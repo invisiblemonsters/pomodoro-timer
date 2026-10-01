@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pomodoro Timer</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: #0d1117; color: #e6edf3;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .card {
+    width: min(360px, 92vw); padding: 32px 28px;
+    background: #161b22; border: 1px solid #30363d; border-radius: 16px;
+    text-align: center; box-shadow: 0 10px 40px rgba(0, 0, 0, .45);
+  }
+  h1 { margin: 0 0 4px; font-size: 18px; font-weight: 600; letter-spacing: .02em; }
+  .phase { margin: 0 0 18px; font-size: 13px; text-transform: uppercase; letter-spacing: .14em; color: #8b949e; }
+  .phase.work { color: #ff7b72; }
+  .phase.shortBreak { color: #3fb950; }
+  .phase.longBreak { color: #58a6ff; }
+  .time { font-size: 64px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; margin: 6px 0 18px; }
+  .bar { height: 6px; border-radius: 3px; background: #30363d; overflow: hidden; margin-bottom: 22px; }
+  .bar > div { height: 100%; width: 0%; background: #58a6ff; transition: width .2s linear; }
+  .buttons { display: flex; gap: 10px; justify-content: center; }
+  button {
+    font: inherit; font-size: 14px; padding: 9px 18px; border-radius: 8px;
+    border: 1px solid #30363d; background: #21262d; color: #e6edf3; cursor: pointer;
+  }
+  button:hover { background: #30363d; }
+  button.primary { background: #238636; border-color: #2ea043; }
+  button.primary:hover { background: #2ea043; }
+  .sessions { margin: 18px 0 0; font-size: 13px; color: #8b949e; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <h1>Pomodoro Timer</h1>
+    <p class="phase work" id="phase">Focus</p>
+    <p class="time" id="time">25:00</p>
+    <div class="bar"><div id="progress"></div></div>
+    <div class="buttons">
+      <button class="primary" id="start-pause">Start</button>
+      <button id="skip">Skip</button>
+      <button id="reset">Reset</button>
+    </div>
+    <p class="sessions" id="sessions">Completed sessions: 0</p>
+  </main>
+<script>
+(function (global) {
+  'use strict';
+
+  var PHASE_LABELS = { work: 'Focus', shortBreak: 'Short break', longBreak: 'Long break' };
+
+  class PomodoroTimer {
+    constructor(options) {
+      options = options || {};
+      var durations = {
+        work: options.workMs != null ? options.workMs : 25 * 60 * 1000,
+        shortBreak: options.shortBreakMs != null ? options.shortBreakMs : 5 * 60 * 1000,
+        longBreak: options.longBreakMs != null ? options.longBreakMs : 15 * 60 * 1000
+      };
+      var every = options.longBreakEvery != null ? options.longBreakEvery : 4;
+      if (!(durations.work > 0 && durations.shortBreak > 0 && durations.longBreak > 0)) {
+        throw new RangeError('durations must be positive numbers of milliseconds');
+      }
+      if (!Number.isInteger(every) || every < 1) {
+        throw new RangeError('longBreakEvery must be a positive integer');
+      }
+      this.durations = durations;
+      this.longBreakEvery = every;
+      this.reset();
+    }
+
+    reset() {
+      this.completedWork = 0;
+      this.phase = 'work';
+      this.remainingMs = this.durations.work;
+      this.running = false;
+      this.lastTickMs = null;
+      return this.snapshot();
+    }
+
+    durationFor(phase) {
+      return this.durations[phase];
+    }
+
+    start(nowMs) {
+      if (!this.running) {
+        this.running = true;
+        this.lastTickMs = nowMs;
+      }
+      return this.snapshot();
+    }
+
+    pause(nowMs) {
+      if (this.running) {
+        this._advance(nowMs);
+        this.running = false;
+        this.lastTickMs = null;
+      }
+      return this.snapshot();
+    }
+
+    tick(nowMs) {
+      if (this.running) this._advance(nowMs);
+      return this.snapshot();
+    }
+
+    // Ends the current phase immediately and lands at the start of the next one.
+    skip(nowMs) {
+      var completed = 0;
+      if (this.running) {
+        completed = this._advance(nowMs != null ? nowMs : this.lastTickMs);
+      }
+      if (completed === 0) this._completePhase();
+      this.remainingMs = this.durationFor(this.phase);
+      return this.snapshot();
+    }
+
+    progress() {
+      var p = 1 - (this.remainingMs / this.durationFor(this.phase));
+      return Math.min(1, Math.max(0, p));
+    }
+
+    snapshot() {
+      return {
+        phase: this.phase,
+        remainingMs: this.remainingMs,
+        running: this.running,
+        completedWork: this.completedWork,
+        phaseDurationMs: this.durationFor(this.phase)
+      };
+    }
+
+    _advance(nowMs) {
+      var delta = Math.max(0, nowMs - this.lastTickMs);
+      this.lastTickMs = nowMs;
+      this.remainingMs -= delta;
+      var completed = 0;
+      while (this.remainingMs <= 0) {
+        this._completePhase();
+        this.remainingMs += this.durationFor(this.phase);
+        completed += 1;
+      }
+      return completed;
+    }
+
+    _completePhase() {
+      if (this.phase === 'work') {
+        this.completedWork += 1;
+        this.phase = this.completedWork % this.longBreakEvery === 0 ? 'longBreak' : 'shortBreak';
+      } else {
+        this.phase = 'work';
+      }
+    }
+
+    static formatRemaining(ms) {
+      var totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+      var m = Math.floor(totalSeconds / 60);
+      var s = totalSeconds % 60;
+      return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+    }
+  }
+
+  function initUI(doc, deps) {
+    deps = deps || {};
+    var now = deps.now || function () { return Date.now(); };
+    var setIntervalFn = deps.setInterval || function (fn, ms) { return global.setInterval(fn, ms); };
+    var clearIntervalFn = deps.clearInterval || function (id) { global.clearInterval(id); };
+
+    var els = {
+      phase: doc.getElementById('phase'),
+      time: doc.getElementById('time'),
+      progress: doc.getElementById('progress'),
+      startPause: doc.getElementById('start-pause'),
+      skip: doc.getElementById('skip'),
+      reset: doc.getElementById('reset'),
+      sessions: doc.getElementById('sessions')
+    };
+
+    var timer = new PomodoroTimer();
+    var uiInterval = setIntervalFn(render, 250);
+
+    function render() {
+      var snap = timer.tick(now());
+      els.time.textContent = PomodoroTimer.formatRemaining(snap.remainingMs);
+      els.phase.textContent = PHASE_LABELS[snap.phase];
+      els.phase.className = 'phase ' + snap.phase;
+      els.sessions.textContent = 'Completed sessions: ' + snap.completedWork;
+      els.progress.style.width = (timer.progress() * 100).toFixed(2) + '%';
+      els.startPause.textContent = snap.running
+        ? 'Pause'
+        : (snap.remainingMs === snap.phaseDurationMs ? 'Start' : 'Resume');
+    }
+
+    els.startPause.addEventListener('click', function () {
+      if (timer.running) timer.pause(now()); else timer.start(now());
+      render();
+    });
+    els.skip.addEventListener('click', function () {
+      timer.skip(now());
+      render();
+    });
+    els.reset.addEventListener('click', function () {
+      timer.reset();
+      render();
+    });
+
+    render();
+    return {
+      timer: timer,
+      render: render,
+      stop: function () { clearIntervalFn(uiInterval); }
+    };
+  }
+
+  function boot() {
+    initUI(document, {});
+  }
+
+  global.PomodoroTimer = PomodoroTimer;
+  global.PomodoroUI = { initUI: initUI };
+
+  if (typeof document !== 'undefined' && document.getElementById) {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', boot);
+    } else {
+      boot();
+    }
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+</body>
+</html>

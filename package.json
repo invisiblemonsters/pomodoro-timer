@@ -1,0 +1,10 @@
+{
+  "name": "pomodoro-timer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Single-file Pomodoro timer web toy with a unit-tested core.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "MIT"
+}
